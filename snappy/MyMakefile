@@ -1,0 +1,16 @@
+OBJS=snappy.o snappy-c.o snappy-sinksource.o snappy-stubs-internal.o
+LIBNAME=libsnappy.a
+CCFLAGS=-std=c++11 -stdlib=libc++ -lc++abi
+
+all: $(LIBNAME)
+
+$(LIBNAME): $(OBJS)
+	ar rcs $@ $^
+	ranlib $@
+
+$(OBJS): %.o:%.cc
+	$(CC) $(CCFLAGS) $< -c -o $@
+
+clean:
+	-rm -rf *.o
+.PHONY: clean
