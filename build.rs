@@ -25,15 +25,22 @@ fn main() {
     assert!(status.success(),
             "autogen.sh should finish ok");
 
+    let status = Command::new("./configure")
+        .current_dir(&snappy_dir)
+        .status()
+        .expect("should spawn configure ok");
+    assert!(status.success(),
+            "configure should finish ok");
+
     let status = Command::new("make")
-        .args(&["snappy.la"])
+        .args(&["libsnappy.la"])
         .current_dir(&snappy_dir)
         .status()
         .expect("should spawn make ok");
     assert!(status.success(),
             "make should finish ok");
 
-    println!("rustc-link-lib=static=bz2");
+    println!("rustc-link-lib=static=snappy");
     println!("rustc-link-search=static={}",
              snappy_dir.to_str().expect("dir should be utf8"));
 }
