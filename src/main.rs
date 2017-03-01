@@ -5,32 +5,14 @@ use std::io::{self, Read, Write};
 use std::path;
 use std::process;
 
+mod bindings;
+
 mod snappy {
-    extern crate libc;
-    use self::libc::{c_char, c_int, size_t};
+    #![allow(unreachable_patterns)]
+
+    use bindings::*;
     use std::error;
     use std::fmt;
-
-    extern {
-        fn snappy_compress(input: *const c_char,
-                           input_length: size_t,
-                           compressed: *mut c_char,
-                           compressed_length: *mut size_t)
-                           -> c_int;
-
-        fn snappy_uncompress(compressed: *const c_char,
-                             compressed_length: size_t,
-                             uncompressed: *mut c_char,
-                             uncompressed_length: *mut size_t)
-                             -> c_int;
-
-        fn snappy_max_compressed_length(source_length: size_t) -> size_t;
-
-        fn snappy_uncompressed_length(compressed: *const c_char,
-                                      compressed_length: size_t,
-                                      result: *mut size_t)
-                                      -> c_int;
-    }
 
     /// Errors that can occur when compressing or uncompressing data with
     /// snappy.
@@ -72,7 +54,7 @@ mod snappy {
                                          compressed.as_mut_ptr() as *mut _,
                                          &mut compressed_len);
             match result {
-                0 => {
+                snappy_status::SNAPPY_OK => {
                     if compressed_len >= compressed.len() {
                         Err(Error::UnexpectedLength)
                     } else {
@@ -80,8 +62,8 @@ mod snappy {
                         Ok(compressed)
                     }
                 }
-                1 => Err(Error::InvalidInput),
-                2 => Err(Error::BufferTooSmall),
+                snappy_status::SNAPPY_INVALID_INPUT => Err(Error::InvalidInput),
+                snappy_status::SNAPPY_BUFFER_TOO_SMALL => Err(Error::BufferTooSmall),
                 _ => Err(Error::Unknown),
             }
         }
@@ -97,9 +79,9 @@ mod snappy {
                 compressed.len() as _,
                 &mut uncompressed_len);
             match result {
-                0 => Ok(()),
-                1 => Err(Error::InvalidInput),
-                2 => Err(Error::BufferTooSmall),
+                snappy_status::SNAPPY_OK => Ok(()),
+                snappy_status::SNAPPY_INVALID_INPUT => Err(Error::InvalidInput),
+                snappy_status::SNAPPY_BUFFER_TOO_SMALL => Err(Error::BufferTooSmall),
                 _ => Err(Error::Unknown),
             }?
         }
@@ -112,15 +94,15 @@ mod snappy {
                 uncompressed.as_mut_ptr() as *mut _,
                 &mut uncompressed_len);
             match result {
-                0 => {
+                snappy_status::SNAPPY_OK => {
                     if uncompressed.len() != uncompressed_len {
                         Err(Error::UnexpectedLength)
                     } else {
                         Ok(uncompressed)
                     }
                 }
-                1 => Err(Error::InvalidInput),
-                2 => Err(Error::BufferTooSmall),
+                snappy_status::SNAPPY_INVALID_INPUT => Err(Error::InvalidInput),
+                snappy_status::SNAPPY_BUFFER_TOO_SMALL => Err(Error::BufferTooSmall),
                 _ => Err(Error::Unknown),
             }
         }

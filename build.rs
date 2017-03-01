@@ -1,3 +1,5 @@
+extern crate bindgen;
+
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
@@ -46,6 +48,21 @@ fn main() {
         lib
     };
     assert!(libsnappy.is_file());
+
+    let bindings = bindgen::Builder::default()
+        .no_unstable_rust()
+        .header("snappy/snappy-c.h")
+        .raw_line("#![allow(non_upper_case_globals)]")
+        .raw_line("#![allow(non_camel_case_types)]")
+        .raw_line("#![allow(non_snake_case)]")
+        .raw_line("#![allow(dead_code)]")
+        .generate()
+        .expect("should automaically generate FFI bindings");
+
+    bindings
+        .write_to_file(root_dir.join("src/bindings.rs"))
+        .expect("should write bindings!");
+
 
     println!("cargo:rustc-link-lib=static=snappy");
     println!("cargo:rustc-link-lib=c++abi");

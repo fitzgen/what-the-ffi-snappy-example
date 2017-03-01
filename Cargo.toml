@@ -3,5 +3,8 @@ authors = ["Nick Fitzgerald <fitzgen@gmail.com>"]
 name = "snappy_example"
 version = "0.1.0"
 
+[build-dependencies]
+bindgen = "0.22.0"
+
 [dependencies]
 libc = "0.2.20"

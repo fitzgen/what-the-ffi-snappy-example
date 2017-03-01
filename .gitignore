@@ -2,6 +2,7 @@ target
 *.o
 *.lo
 *.la
+src/bindings.rs
 snappy/.deps/
 snappy/.libs/
 snappy/INSTALL
