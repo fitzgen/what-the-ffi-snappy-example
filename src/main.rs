@@ -1,5 +1,3 @@
-extern crate libc;
-use libc::{c_char, c_int, size_t};
 use std::env;
 use std::error;
 use std::fs;
@@ -7,25 +5,126 @@ use std::io::{self, Read, Write};
 use std::path;
 use std::process;
 
-extern {
-    fn snappy_compress(input: *const c_char,
-                       input_length: size_t,
-                       compressed: *mut c_char,
-                       compressed_length: *mut size_t)
-                       -> c_int;
+mod snappy {
+    extern crate libc;
+    use self::libc::{c_char, c_int, size_t};
+    use std::error;
+    use std::fmt;
 
-    fn snappy_uncompress(compressed: *const c_char,
-                         compressed_length: size_t,
-                         uncompressed: *mut c_char,
-                         uncompressed_length: *mut size_t)
-                         -> c_int;
+    extern {
+        fn snappy_compress(input: *const c_char,
+                           input_length: size_t,
+                           compressed: *mut c_char,
+                           compressed_length: *mut size_t)
+                           -> c_int;
 
-    fn snappy_max_compressed_length(source_length: size_t) -> size_t;
+        fn snappy_uncompress(compressed: *const c_char,
+                             compressed_length: size_t,
+                             uncompressed: *mut c_char,
+                             uncompressed_length: *mut size_t)
+                             -> c_int;
 
-    fn snappy_uncompressed_length(compressed: *const c_char,
-                                  compressed_length: size_t,
-                                  result: *mut size_t)
-                                  -> c_int;
+        fn snappy_max_compressed_length(source_length: size_t) -> size_t;
+
+        fn snappy_uncompressed_length(compressed: *const c_char,
+                                      compressed_length: size_t,
+                                      result: *mut size_t)
+                                      -> c_int;
+    }
+
+    /// Errors that can occur when compressing or uncompressing data with
+    /// snappy.
+    #[derive(Clone, Copy, Debug)]
+    pub enum Error {
+        InvalidInput,
+        BufferTooSmall,
+        UnexpectedLength,
+        Unknown,
+    }
+
+    impl fmt::Display for Error {
+        fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "{}", error::Error::description(self))
+        }
+    }
+
+    impl error::Error for Error {
+        fn description(&self) -> &'static str {
+            match *self {
+                Error::InvalidInput => "invalid input",
+                Error::BufferTooSmall => "buffer too small",
+                Error::UnexpectedLength => "unexpected length",
+                Error::Unknown => "unknown",
+            }
+        }
+    }
+
+    /// Compress the given input and return the compressed output.
+    pub fn compress(input: &[u8]) -> Result<Vec<u8>, Error> {
+        let mut compressed_len = unsafe {
+            snappy_max_compressed_length(input.len() as _)
+        };
+
+        let mut compressed = vec![0; compressed_len];
+        unsafe {
+            let result = snappy_compress(input.as_ptr() as *const _,
+                                         input.len() as _,
+                                         compressed.as_mut_ptr() as *mut _,
+                                         &mut compressed_len);
+            match result {
+                0 => {
+                    if compressed_len >= compressed.len() {
+                        Err(Error::UnexpectedLength)
+                    } else {
+                        compressed.set_len(compressed_len as _);
+                        Ok(compressed)
+                    }
+                }
+                1 => Err(Error::InvalidInput),
+                2 => Err(Error::BufferTooSmall),
+                _ => Err(Error::Unknown),
+            }
+        }
+    }
+
+    /// Decompress the given compressed input and return the uncompressed
+    /// output.
+    pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>, Error> {
+        let mut uncompressed_len = 0;
+        unsafe {
+            let result = snappy_uncompressed_length(
+                compressed.as_ptr() as *const _,
+                compressed.len() as _,
+                &mut uncompressed_len);
+            match result {
+                0 => Ok(()),
+                1 => Err(Error::InvalidInput),
+                2 => Err(Error::BufferTooSmall),
+                _ => Err(Error::Unknown),
+            }?
+        }
+
+        let mut uncompressed = vec![0; uncompressed_len];
+        unsafe {
+            let result = snappy_uncompress(
+                compressed.as_ptr() as *const _,
+                compressed.len() as _,
+                uncompressed.as_mut_ptr() as *mut _,
+                &mut uncompressed_len);
+            match result {
+                0 => {
+                    if uncompressed.len() != uncompressed_len {
+                        Err(Error::UnexpectedLength)
+                    } else {
+                        Ok(uncompressed)
+                    }
+                }
+                1 => Err(Error::InvalidInput),
+                2 => Err(Error::BufferTooSmall),
+                _ => Err(Error::Unknown),
+            }
+        }
+    }
 }
 
 fn main() {
@@ -92,7 +191,7 @@ impl Command {
 
 /// Tiny helper to create a `std::io::Error` error result of kind
 /// `std::io::ErrorKind::Other` from the given argument.
-fn other_io_error<E>(e: E) -> io::Result<()>
+fn other_io_error<T, E>(e: E) -> io::Result<T>
     where E: Into<Box<error::Error + Send + Sync>>
 {
     Err(io::Error::new(io::ErrorKind::Other, e))
@@ -105,24 +204,8 @@ fn compress(from: &path::Path, to: &path::Path) -> io::Result<()> {
     let mut contents = vec![];
     from_file.read_to_end(&mut contents)?;
 
-    let mut compressed_len = unsafe {
-        snappy_max_compressed_length(contents.len() as _)
-    };
-
-    let mut compressed = vec![0; compressed_len];
-    unsafe {
-        let result = snappy_compress(contents.as_ptr() as *const _,
-                                     contents.len() as _,
-                                     compressed.as_mut_ptr() as *mut _,
-                                     &mut compressed_len);
-        if result != 0 {
-            return other_io_error(format!("snappy error result: {}", result));
-        }
-        if compressed_len >= compressed.len() {
-            return other_io_error("bad compressed length from snappy");
-        }
-        compressed.set_len(compressed_len as _);
-    }
+    let compressed = snappy::compress(&contents)
+        .or_else(|e| other_io_error(e))?;
 
     let mut to_file = fs::File::create(to)?;
     to_file.write_all(&compressed)
@@ -135,31 +218,8 @@ fn decompress(from: &path::Path, to: &path::Path) -> io::Result<()> {
     let mut contents = vec![];
     from_file.read_to_end(&mut contents)?;
 
-    let mut uncompressed_len = 0;
-    unsafe {
-        let result = snappy_uncompressed_length(
-            contents.as_ptr() as *const _,
-            contents.len() as _,
-            &mut uncompressed_len as *mut _);
-        if result != 0 {
-            return other_io_error(format!("snappy error result: {}", result));
-        }
-    }
-
-    let mut uncompressed = vec![0; uncompressed_len];
-    unsafe {
-        let result = snappy_uncompress(
-            contents.as_ptr() as *const _,
-            contents.len() as _,
-            uncompressed.as_mut_ptr() as *mut _,
-            &mut uncompressed_len as *mut _);
-        if result != 0 {
-            return other_io_error(format!("snappy error result: {}", result));
-        }
-        if uncompressed.len() != uncompressed_len {
-            return other_io_error("bad uncompressed length from snappy");
-        }
-    }
+    let uncompressed = snappy::decompress(&contents)
+        .or_else(|e| other_io_error(e))?;
 
     let mut to_file = fs::File::create(to)?;
     to_file.write_all(&uncompressed)
